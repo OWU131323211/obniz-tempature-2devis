@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>温度モニタリング（2台統合解析版）</title>
+    <script src="https://unpkg.com/obniz/obniz.js"></script>
+    <style>
+      body {
+        font-family: sans-serif;
+        max-width: 700px;
+        margin: 20px auto;
+      }
+      .log-box {
+        white-space: pre-wrap;
+        background: #eee;
+        padding: 10px;
+        border-radius: 5px;
+        min-height: 120px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>🌡️ 温度モニタリング + Gemini統合解析（2台）</h1>
+
+    <button id="startButton">計測開始</button>
+    <button id="stopButton" disabled>計測停止</button>
+
+    <h2>📌 センサー取得ログ（Obniz A）</h2>
+    <div id="logA" class="log-box"></div>
+
+    <h2>📌 センサー取得ログ（Obniz B）</h2>
+    <div id="logB" class="log-box"></div>
+
+    <h2>🤖 AI解析ログ（2台統合）</h2>
+    <div id="ai" class="log-box"></div>
+
+    <script>
+      // ★ あなたの 2台の Obniz ID を入力 ★
+      const obnizA = new Obniz("XXXX-XXXX", { auto_connect: true });
+      const obnizB = new Obniz("YYYY-YYYY", { auto_connect: true });
+
+      let sensorA = null;
+      let sensorB = null;
+
+      let intervalA = null;
+      let intervalB = null;
+
+      let latestA = null; // {temp, humid}
+      let latestB = null; // {temp, humid}
+
+      const logA = document.getElementById("logA");
+      const logB = document.getElementById("logB");
+      const aiLog = document.getElementById("ai");
+
+      const startBtn = document.getElementById("startButton");
+      const stopBtn = document.getElementById("stopButton");
+
+      function addLog(target, message) {
+        const t = new Date().toLocaleTimeString();
+        target.textContent = `[${t}] ${message}\n` + target.textContent;
+      }
+
+      // ---------- Obniz A ----------
+      obnizA.onconnect = () => {
+        addLog(logA, "Obniz A 接続完了");
+        sensorA = obnizA.wired("Grove_SHT35Sensor", { sda: 26, scl: 32 });
+        addLog(logA, "センサー準備完了（A）");
+      };
+
+      // ---------- Obniz B ----------
+      obnizB.onconnect = () => {
+        addLog(logB, "Obniz B 接続完了");
+        sensorB = obnizB.wired("Grove_SHT35Sensor", { sda: 26, scl: 32 });
+        addLog(logB, "センサー準備完了（B）");
+      };
+
+      // ---------- Geminiへ統合解析 ----------
+      async function analyzeBoth() {
+        if (!latestA || !latestB) return;
+
+        const payload = {
+          sensorA: latestA,
+          sensorB: latestB,
+        };
+
+        try {
+          const res = await fetch("http://172.20.10.2:3000/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              temperatureA: latestA.temp,
+              humidityA: latestA.humid,
+              temperatureB: latestB.temp,
+              humidityB: latestB.humid,
+            }),
+          });
+          const result = await res.json();
+
+          addLog(aiLog, result.analysis);
+        } catch (e) {
+          addLog(aiLog, "解析エラー: " + e.message);
+        }
+      }
+
+      // ---------- 計測開始 ----------
+      startBtn.addEventListener("click", () => {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        // A計測
+        intervalA = setInterval(async () => {
+          try {
+            const data = await sensorA.getAllWait();
+            const temp = data.temperature.toFixed(2);
+            const humid = data.humidity.toFixed(2);
+            addLog(logA, `温度 ${temp}℃ / 湿度 ${humid}%`);
+
+            latestA = { temp: Number(temp), humid: Number(humid) };
+            analyzeBoth();
+          } catch (e) {
+            addLog(logA, "取得エラー: " + e.message);
+          }
+        }, 5000);
+
+        // B計測
+        intervalB = setInterval(async () => {
+          try {
+            const data = await sensorB.getAllWait();
+            const temp = data.temperature.toFixed(2);
+            const humid = data.humidity.toFixed(2);
+            addLog(logB, `温度 ${temp}℃ / 湿度 ${humid}%`);
+
+            latestB = { temp: Number(temp), humid: Number(humid) };
+            analyzeBoth();
+          } catch (e) {
+            addLog(logB, "取得エラー: " + e.message);
+          }
+        }, 5000);
+      });
+
+      // ---------- 停止 ----------
+      stopBtn.addEventListener("click", () => {
+        clearInterval(intervalA);
+        clearInterval(intervalB);
+
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      });
+    </script>
+  </body>
+</html>
