@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 app.use(express.static(__dirname));
 
-const GEMINI_API_KEY = "AIzaSyBsaqotW3PsfSfEy2TryVewpWkjh-Y5i_k";
+const GEMINI_API_KEY = "";
 
 // ---------------------------------------------------------------
 app.post("/analyze", async (req, res) => {
